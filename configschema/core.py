@@ -1,9 +1,10 @@
+"""
+TODO
+"""
 
-from exceptions import ConfigValidationError, ConfigValidatorError
 
-
-
-    
+from .exceptions import SchemaError, ValidationError
+import json
 
 
 class Token(object):
@@ -65,7 +66,7 @@ class ContainerToken(Token):
         elif definition in ContainerToken.tokens:
             return ContainerToken.tokens[definition]()
         else:
-            raise ConfigValidatorError("Unexpected type '{}' for definition `{}` with value `{}`".format(type(definition), name or '?', definition))
+            raise SchemaError("Unexpected type '{}' for definition `{}` with value `{}`".format(type(definition), name or '?', definition))
         
 
 
@@ -102,7 +103,7 @@ class ValueToken(Token):
         if value == None and self.default != None:
             value = self.default
         if self.required and value == None:
-            raise ConfigValidationError(u"Token is required, but None")
+            raise ValidationError(u"Token is required, but None")
         return value
         
         
@@ -128,11 +129,15 @@ class DecoratorToken(ContainerToken):
         return super(DecoratorToken, self).as_json(wrapped=self.wrapped_token.as_json(), **kwargs)
     
 
-class ConfigValidator(ContainerToken):
+class ConfigSchema(ContainerToken):
     """
     The main-class for validating the config. Compiles the definition and checks it is valid.
     After this, the validate-method will validate a given struct against the definition.
     """
+    
+    # Store the exceptions in this class, to make easier to obtain references
+    ValidationError = ValidationError
+    SchemaError = SchemaError
     
     def __init__(self, definition):
         """
@@ -140,7 +145,7 @@ class ConfigValidator(ContainerToken):
         `definition`
             The definition to parse and validate again later on
         """
-        self.compiled = self._get_token(definition, name="ConfiValidator")
+        self.compiled = self._get_token(definition, name="ConfigSchema")
         
         
     def validate(self, struct):
@@ -157,8 +162,14 @@ class ConfigValidator(ContainerToken):
         
     def as_json(self):
         return {
-            u"name": u"ConfigValidator",
+            u"name": u"ConfigSchema",
             "definition": self.compiled.as_json()
         }
+        
+        
+    def __repr__(self):
+        """ This uses the as_json()-Method to obtain a representation of the schema
+        which contains all information """
+        return json.dumps(self.as_json(), indent=4)
         
         

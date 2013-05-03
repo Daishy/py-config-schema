@@ -1,7 +1,4 @@
-from .core import ConfigValidator
+from .core import ConfigSchema
 from .decorator import Length, Range, NotEmpty
-from .exceptions import ConfigValidatorError, ConfigValidationError
+from .exceptions import SchemaError, ValidationError
 from .tokens import Int, String, Bool
-
-__author__ = "Andre Schemschat (mail@schemschat.net)"
-__version__ = "0.1"

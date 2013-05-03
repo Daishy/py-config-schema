@@ -3,10 +3,8 @@ try:
 except ImportError:
     from distutils.core import setup
 
-import sys
-
 setup(
-    name='configschema',
+    name='config-schema',
     url='https://github.com/Daishy/py-config-schema',
     version="0.1",
     description="Simple validator-library for validating and completing a program-configuration",

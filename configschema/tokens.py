@@ -1,5 +1,5 @@
-from core import ValueToken, ContainerToken
-from exceptions import ConfigValidationError
+from .core import ValueToken, ContainerToken
+from .exceptions import ValidationError
 
 @ContainerToken.register_for(int)
 class Int(ValueToken):
@@ -18,7 +18,7 @@ class Int(ValueToken):
         """ Validates the integer. """
         value = super(Int, self).validate(value)
         if value != None and not isinstance(value, int):
-            raise ConfigValidationError(u"int-value expected, but got {}".format(type(value)))
+            raise ValidationError(u"int-value expected, but got {}".format(type(value)))
         return value
     
     def as_json(self, **kwargs):
@@ -39,8 +39,8 @@ class String(ValueToken):
     def validate(self, value):
         value = super(String, self).validate(value)
         
-        if value != None and not isinstance(value, str):
-            raise ConfigValidationError(u"String expected, but got {}".format(type(value)))
+        if value != None and not (isinstance(value, str) or isinstance(value, unicode)):
+            raise ValidationError(u"String expected, but got {}".format(type(value)))
         return value
 
 
@@ -64,7 +64,7 @@ class Bool(ValueToken):
     def validate(self, struct):
         struct = super(Bool, self).validate(struct)
         if struct != None and not isinstance(struct, bool):
-            raise ConfigValidationError(u"value should be boolean, but is {}".format(struct))
+            raise ValidationError(u"value should be boolean, but is {}".format(struct))
         return struct
 
 
@@ -106,7 +106,7 @@ class Dict(ContainerToken):
         # Check if we have data and need Data
         if struct == None:
             if self.required:
-                raise ConfigValidationError(u"`struct` passed to Dict should have values, but is None!")
+                raise ValidationError(u"`struct` passed to Dict should have values, but is None!")
             
             return None
         # We have data, so check it
@@ -121,7 +121,7 @@ class Dict(ContainerToken):
             
             # Finally check, if we still have keys in the struct left
             if not self.allow_extra_keys and len(struct):
-                raise ConfigValidationError(u"Found keys ({}) not defined in Schema. This is not allowed!".format(u",".join(struct.keys())))
+                raise ValidationError(u"Found keys ({}) not defined in Schema. This is not allowed!".format(u",".join(struct.keys())))
         
             return result
     
@@ -129,3 +129,6 @@ class Dict(ContainerToken):
     def as_json(self, **kwargs):
         _tmp = {key: token.as_json() for key, token in self.compiled.items()}
         return super(Dict, self).as_json(name="dict", allow_extra_keys=self.allow_extra_keys, **_tmp)
+    
+
+    

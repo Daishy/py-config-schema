@@ -1,28 +1,33 @@
 """
-Tests for the *configguard*-system
+Tests for the configschema.
+
+Has to be run from a toplevel-skript, because of the python3.3 relative imports
+(If run from this file, 
+
+
 """
 
 
 import unittest
-from exceptions import ConfigValidationError, ConfigValidatorError
-from core import ConfigValidator
-from tokens import Int, String, Bool, Dict
-from decorator import Range, Length, NotEmpty
+from .exceptions import SchemaError, ValidationError
+from .core import ConfigSchema
+from .tokens import Int, String, Bool, Dict
+from .decorator import Range, Length, NotEmpty
 
 
-class ConfigValidatorTests(unittest.TestCase):
+class ConfigSchemaTests(unittest.TestCase):
     """ Class for testing the Configguard """
     
     def assertValidates(self, config_definition, struct, expected_result=None):
-        cv = ConfigValidator(config_definition)
+        cv = ConfigSchema(config_definition)
         res = cv.validate(struct)
         if expected_result:
             self.assertEqual(res, expected_result)
         return res
     
     def assertFails(self, config_definition, struct):
-        cv = ConfigValidator(config_definition)
-        with self.assertRaises(ConfigValidationError):
+        cv = ConfigSchema(config_definition)
+        with self.assertRaises(ValidationError):
             cv.validate(struct)
             
             
@@ -48,6 +53,7 @@ class ConfigValidatorTests(unittest.TestCase):
         # Check type-check is correct
         self.assertFails(int, "1")
         
+        
     def test_basic_types_string(self):
         # Check Basic values
         self.assertValidates(str, "test")
@@ -57,6 +63,7 @@ class ConfigValidatorTests(unittest.TestCase):
         # Empty values should validate
         self.assertValidates(str, "")
         self.assertValidates(String(required=False), None)
+        
         
     def test_basic_types_bool(self):
         self.assertValidates(bool, True)
@@ -157,5 +164,10 @@ class ConfigValidatorTests(unittest.TestCase):
         
         
         
-
-unittest.main()
+def run_tests():
+    """ Method to run the tests from a toplevel skript, so relative imports work """
+    suite = unittest.TestLoader().loadTestsFromTestCase(ConfigSchemaTests)
+    #suite.run()
+    runner=unittest.TextTestRunner()
+    runner.run(suite)
+    

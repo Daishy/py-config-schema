@@ -1,6 +1,6 @@
 
-from core import DecoratorToken
-from exceptions import ConfigValidationError
+from .core import DecoratorToken
+from .exceptions import ValidationError
 
 
 class Range(DecoratorToken):
@@ -19,9 +19,9 @@ class Range(DecoratorToken):
     def validate(self, struct):
         struct = super(Range, self).validate(struct)
         if struct != None and self.min != None and struct < self.min:
-            raise ConfigValidationError(u"Range: Value {} is not <= than {}".format(struct, self.min))
+            raise ValidationError(u"Range: Value {} is not <= than {}".format(struct, self.min))
         if struct != None and self.max != None and struct > self.max:
-            raise ConfigValidationError(u"Range: Value {} is not >= than {}".format(struct, self.min))
+            raise ValidationError(u"Range: Value {} is not >= than {}".format(struct, self.min))
         return struct
 
 class Length(DecoratorToken):
@@ -42,11 +42,11 @@ class Length(DecoratorToken):
         if struct != None:
             _length = len("{}".format(struct))
             if self.min != None and _length < self.min:
-                raise ConfigValidationError(u"Length of {} is < than {}".format(struct, self.min))
+                raise ValidationError(u"Length of {} is < than {}".format(struct, self.min))
             if self.max != None and _length > self.max:
-                raise ConfigValidationError(u"Length of {} is > than {}".format(struct, self.max))
+                raise ValidationError(u"Length of {} is > than {}".format(struct, self.max))
             if self.length != None and _length != self.length:
-                raise ConfigValidationError(u"Length of {} is != than {}".format(struct, self.length))
+                raise ValidationError(u"Length of {} is != than {}".format(struct, self.length))
         
         return struct
 
