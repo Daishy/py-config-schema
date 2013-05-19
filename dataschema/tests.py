@@ -260,6 +260,10 @@ class DataSchemaTests(unittest.TestCase):
 			{1: True, 2: False, "str": 1},
 			{1: True, 2: False, "str": 1})
 
+		self.assertFails(
+			{int: int, object: String()},
+			{1: "test"})
+
 	def test_dict_typekeys_and_valuekeys_coexist(self):
 		self.assertValidates(
 			{"a": int, int: bool},
@@ -277,6 +281,17 @@ class DataSchemaTests(unittest.TestCase):
 			{A: int},
 			{a: 1},
 			{a: 1})
+
+	def test_value_over_type(self):
+		self.assertValidates(
+			{1: int, int: str},
+			{1: 1, 2: "a"},
+			{1: 1, 2: "a"})
+
+		self.assertFails(
+			{1: int, int: str},
+			{1: "a", 2: "a"})
+
 
 
 
