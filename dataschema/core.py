@@ -149,6 +149,10 @@ class Schema(ContainerToken):
     The main-class for validating the config. Compiles the definition and checks it is valid.
     After this, the validate-method will validate a given struct against the definition.
     """
+
+    # Store the exceptions on the schema, so they are easy accessable
+    SchemaError = SchemaError
+    ValidationError = ValidationError
     
     def __init__(self, definition):
         """
