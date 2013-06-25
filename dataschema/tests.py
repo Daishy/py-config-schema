@@ -7,20 +7,28 @@ Has to be run from a toplevel-skript, because of the python3.3 relative imports
 
 
 import unittest
+import sys
+
 from .exceptions import SchemaError, ValidationError
 from .core import Schema
-from .value_tokens import Int, String, Bool,  Object
+from .value_tokens import Int, String, Bytestring, Bool, Object, AnyString
 from .container_tokens import Dict, And, Or
+from .decorator_tokens import *
 
 
 
 class DataSchemaTests(unittest.TestCase):
 
+	def is_python_2(self):
+		return sys.version_info.major == 2
+
+
 	def assertValidates(self, definition, config, expected_result=None):
 		
 		try:
-			cv = Schema(definition)
-			config = cv.validate(config)
+			schema = definition if isinstance(definition, Schema) else Schema(definition)
+
+			config = schema.validate(config)
 			if expected_result:
 				self.assertEqual(config, expected_result)
 			return config
@@ -30,13 +38,13 @@ class DataSchemaTests(unittest.TestCase):
 			self.fail(e.message)
 	
 	def assertFails(self, definition, config):
-		cv = Schema(definition)
+		schema = definition if isinstance(definition, Schema) else Schema(definition)
 		with self.assertRaises(ValidationError):
-			cv.validate(config)
+			schema.validate(config)
 
 
 	# --------------------------------------------------------------------------------
- 	#  Test basic functionality
+	#  Test basic functionality
 
 	
 	def test_validate_is_idempotent(self):
@@ -66,6 +74,8 @@ class DataSchemaTests(unittest.TestCase):
 			
 
 
+
+
 	# --------------------------------------------------------------------------------
 	# Test value-Tokens
 
@@ -90,33 +100,37 @@ class DataSchemaTests(unittest.TestCase):
 		
 		
 	def test_string(self):
+		string_type = unicode if self.is_python_2() else str
+		bytestring_type = str if self.is_python_2() else bytes
+	 
 		# Check Basic values
-		self.assertValidates(str, "test", "test")
-		self.assertValidates(str, "unicode", "unicode")
-		self.assertValidates(String(), "test", "test")
+		self.assertValidates(string_type, u"test", u"test")	 	
+		self.assertValidates(String(), u"test", u"test")
+
+		self.assertFails(string_type, "nonunicode")
+		self.assertFails(String(), "nonunicode")
 		
-		# Check unicode does not work if it is available
-		try:
-			unicode
-			basestring
-			
-			with self.assertRaises(SchemaError):
-				Schema(unicode)
-			with self.assertRaises(SchemaError):
-				Schema(basestring)
-		except NameError:
-			pass
-		
+
 		# Empty values should validate
-		self.assertValidates(str, "", "")
-		self.assertValidates(String(required=False), None, "")
+		self.assertValidates(string_type, u"", u"")
+		self.assertValidates(String(required=False), None, u"")
 		
 		# default
-		self.assertValidates(String(default="test"), None, "test")
+		self.assertValidates(String(default=u"test"), None, u"test")
 		self.assertValidates(String(required=False), None, None)
 		
 		# type-check
-		self.assertFails(str, 1)
+		self.assertFails(string_type, 1)
+
+
+
+	def test_bytestring(self):
+		string_type = unicode if self.is_python_2() else str
+		bytestring_type = str if self.is_python_2() else bytes
+
+		self.assertValidates(bytestring_type, "test", "test")
+		self.assertValidates(Bytestring(), "test", "test")
+		self.assertFails(string_type, "test")
 		
 		
 	def test_bool(self):
@@ -137,7 +151,16 @@ class DataSchemaTests(unittest.TestCase):
 		
 		
 		self.assertFails(object, None)
-		
+
+
+	def test_anystring(self):
+		if self.is_python_2():
+			self.assertValidates(AnyString(), "a", "a")
+			self.assertValidates(AnyString(), u"a", u"a")
+		else:
+			self.assertValidates(AnyString(), "a", "a")
+			self.assertValidates(AnyString(), u"a", u"a")
+			self.assertFails(AnyString(), b"a")
 
 
 	# --------------------------------------------------------------------------------
@@ -154,12 +177,12 @@ class DataSchemaTests(unittest.TestCase):
 		self.assertFails({'a': int}, 1)
 		
 		
-	def test_dicts_fixed(self):
+	def test_dicts_skip_unknown_keys(self):
 		self.assertFails(
 			{"a": int},
 			{"a":1, "b":2})
 		self.assertValidates(
-			{"a": int, Dict.fixed: False},
+			{"a": int, Dict.skip_unknown_keys: True},
 			{"a": 1, "b": 2},
 			{"a": 1})
 			
@@ -208,7 +231,6 @@ class DataSchemaTests(unittest.TestCase):
 			{'a': Bool(default=None, required=False)},
 			{},
 			{'a': None})
-	
 
 	def test_basic_And(self):
 		self.assertValidates(
@@ -222,7 +244,7 @@ class DataSchemaTests(unittest.TestCase):
 			None)
 
 		self.assertFails(And(int, bool), 1)
-		self.assertFails(And(int, str), "test")
+		self.assertFails(And(int, String()), "test")
 		self.assertFails(And(Int(required=False), bool), None)
 		self.assertValidates(
 			And(Int(required=False), bool),
@@ -234,6 +256,8 @@ class DataSchemaTests(unittest.TestCase):
 	def test_basic_or(self):
 		pass
 		#TODO
+
+
 
 	# --------------------------------------------------------------------------------
 	# Test Dict with type-keys
@@ -284,15 +308,67 @@ class DataSchemaTests(unittest.TestCase):
 
 	def test_value_over_type(self):
 		self.assertValidates(
-			{1: int, int: str},
-			{1: 1, 2: "a"},
-			{1: 1, 2: "a"})
+			{1: int, int: String()},
+			{1: 1, 2: u"a"},
+			{1: 1, 2: u"a"})
 
 		self.assertFails(
-			{1: int, int: str},
-			{1: "a", 2: "a"})
+			{1: int, int: String()},
+			{1: "a", 2: u"a"})
+
+	def test_typekeys_with_dict_value(self):
+		self.assertValidates(
+			{str: {"a": int}},
+			{"1": {"a": 1}, "2": {"a": 2}},
+			{"1": {"a": 1}, "2": {"a": 2}})
+
+		self.assertFails(
+			{str: {"a": int}},
+			{"1": {}}
+		)
+		self.assertFails(
+			{str: {"a": int}},
+			{"1": None}
+		)
 
 
+	# --------------------------------------------------------------------------------
+	# Test Msg-Parameter
+
+	def test_message_parameter(self):
+		try:
+			Schema(Int(msg="Test")).validate("no-int")
+			self.fail(u"This should have raised a ValidationError")
+		except ValidationError as e:
+			self.assertEqual(e.message, "Test")
+
+		try:
+			Schema(Int(msg=None)).validate("no-int")
+			self.fail(u"This should have raised a ValidationError")
+		except ValidationError as e:
+			self.assertEqual(e.message, "Schema->Int expected <type 'int'> but got <type 'str'> (Value: no-int)")
+
+
+	# --------------------------------------------------------------------------------
+	# naming-tests
+
+	def test_simple_naming(self):
+		s = Schema(int)
+		self.assertEqual(s.compiled.path, "Schema->Int")
+
+		s = Schema(And(int, bool))
+		self.assertEqual(s.compiled.path, "Schema->And->")
+		self.assertEqual(s.compiled.compiled[0].path, "Schema->And->Int")
+		self.assertEqual(s.compiled.compiled[1].path, "Schema->And->Bool")
+
+		s = Schema({"a": int, "b": bool})
+		self.assertEqual(s.compiled.path, "Schema->Dict")
+		self.assertEqual(s.compiled.compiled_valuekeys['a'].path, "Schema->Dict:a->Int")
+ 
+ 	def test_repr(self):
+ 		s = Schema({"a": int, "b": bool})
+ 		as_string = repr(s)
+ 		self.assertNotEqual(s, None)
 
 
 
@@ -302,7 +378,7 @@ class DataSchemaTests(unittest.TestCase):
 	def test_complex_configs(self):
 		""" Test some more complex Configs """
 		config = {
-			"name": str,
+			"name": String(),
 			"version": int,
 			"debug": Bool(default=False),
 			"sub": {
@@ -310,9 +386,9 @@ class DataSchemaTests(unittest.TestCase):
 			}
 		}
 		
-		self.assertValidates(config, {"name": "a", "version": 1, "debug": True, "sub":{"sub1": "test"}})
-		self.assertValidates(config, {"name": "a", "version": 1, "sub": {"sub1": "Test"}})
-		self.assertValidates(config, {"name": "a", "version": 2, "sub": {}})
+		self.assertValidates(config, {"name": u"a", "version": 1, "debug": True, "sub":{"sub1": u"test"}})
+		self.assertValidates(config, {"name": u"a", "version": 1, "sub": {"sub1": u"Test"}})
+		self.assertValidates(config, {"name": u"a", "version": 2, "sub": {}})
 		
 		
 	def test_nested_schema(self):
@@ -327,77 +403,124 @@ class DataSchemaTests(unittest.TestCase):
 		self.assertValidates(cs,
 				{'a': 1, 'b':{'b':True}},
 				{'a': 1, 'b':{'b': True}})
+
+
+	# --------------------------------------------------------------------------------
+	#  Test decorators
+
+
+	def test_max_decorator(self):
+		cs = Schema(And(int, Max(10)))
+		self.assertValidates(cs, 1, 1)
+		self.assertFails(cs, 11)
+
 		
+
+	# --------------------------------------------------------------------------------
+	# Test adding one schema to another and combine them
+ 		
 		
-		
-	# def test_schema_addition(self):
-	# 	# Cant add to simple values
-	# 	cs_a = Schema(int)
-	# 	cs_b = Schema(int)
-	# 	with self.assertRaises(SchemaError):
-	# 		cs = cs_a + cs_b
+	def test_schema_addition(self):
+	 	# Cant add to simple values
+	 	cs_a = Schema(int)
+	 	cs_b = Schema(int)
+	 	with self.assertRaises(SchemaError):
+	 		cs = cs_a + cs_b
 			
-	# 	# Cant add dict and simple value
-	# 	cs_a = Schema({'a': int})
-	# 	cs_b = Schema(int)
-	# 	with self.assertRaises(SchemaError):
-	# 		cs = cs_a + cs_b
+	 	# Cant add dict and simple value
+	 	cs_a = Schema({'a': int})
+	 	cs_b = Schema(int)
+	 	with self.assertRaises(SchemaError):
+	 		cs = cs_a + cs_b
 			
-	# 	# Can add two dicts
-	# 	cs_a = Schema({'a': int})
-	# 	cs_b = Schema({'b': bool})
-	# 	cs = cs_a + cs_b
-	# 	self.assertEqual(cs.validate({"a": 1, "b": True}), {"a": 1, "b": True})
+	 	# Can add two dicts
+	 	cs_a = Schema({'a': int})
+	 	cs_b = Schema({'b': bool})
+	 	cs = cs_a + cs_b
+	 	self.assertEqual(cs.validate({"a": 1, "b": True}), {"a": 1, "b": True})
 		
-	# 	# Can only add with distinctiv keys
-	# 	cs_a = Schema({'a': int})
-	# 	cs_b = Schema({'a': bool})
-	# 	with self.assertRaises(SchemaError):
-	# 		cs = cs_a + cs_b
+	 	# Can only add with distinctiv keys
+	 	cs_a = Schema({'a': int})
+	 	cs_b = Schema({'a': bool})
+	 	with self.assertRaises(SchemaError):
+	 		cs = cs_a + cs_b
 			
 		
-	# def test_schema_addition_required(self):
-	# 	# required is used of the stricter one
-	# 	cs_a = Schema({'a': int, Dict.required: True})
-	# 	cs_b = Schema({'b': int, Dict.required: False})
-	# 	cs = cs_a + cs_b
-	# 	self.assertFails(cs, None)
+	def test_schema_addition_required(self):
+	 	# required is used of the stricter one
+	 	cs_a = Schema({'a': int, Dict.required: True})
+	 	cs_b = Schema({'b': int, Dict.required: False})
+	 	cs = cs_a + cs_b
+	 	self.assertFails(cs, None)
 		
-	# 	cs_a = Schema({'a': int, Dict.required: False})
-	# 	cs_b = Schema({'b': int, Dict.required: True})
-	# 	cs = cs_a + cs_b
-	# 	self.assertFails(cs, None)
+	 	cs_a = Schema({'a': int, Dict.required: False})
+	 	cs_b = Schema({'b': int, Dict.required: True})
+	 	cs = cs_a + cs_b
+	 	self.assertFails(cs, None)
 		
-	# 	cs_a = Schema({'a': int, Dict.required: False})
-	# 	cs_b = Schema({'b': int, Dict.required: False})
-	# 	cs = cs_a + cs_b
-	# 	self.assertValidates(cs, None)
+	 	cs_a = Schema({'a': int, Dict.required: False})
+	 	cs_b = Schema({'b': int, Dict.required: False})
+	 	cs = cs_a + cs_b
+	 	self.assertValidates(cs, None)
+	
+	
+	def test_schema_addition_skip_unknown_keys(self):
+	 	# skip_unknown_keys is used from the stricter one
+	 	cs_a = Schema({'a': int, Dict.skip_unknown_keys: True})
+	 	cs_b = Schema({'b': int, Dict.skip_unknown_keys: False})
+	 	cs = cs_a + cs_b
+	 	self.assertEquals(cs.compiled.skip_unknown_keys, False)
+	 	self.assertFails(cs, {'a':1, 'b': 2, 'c': 3})
 		
-	# def test_schema_addition_fixed(self):
-	# 	# fixed is used from the stricter one
-	# 	cs_a = Schema({'a': int, Dict.fixed: True})
-	# 	cs_b = Schema({'b': int, Dict.fixed: False})
-	# 	cs = cs_a + cs_b
-	# 	self.assertFails(cs, {'a':1, 'b': 2, 'c': 3})
+	 	cs_a = Schema({'a': int, Dict.skip_unknown_keys: False})
+	 	cs_b = Schema({'b': int, Dict.skip_unknown_keys: True})
+	 	cs = cs_a + cs_b
+ 	 	self.assertEquals(cs.compiled.skip_unknown_keys, False)
+	 	self.assertFails(cs, {'a':1, 'b': 2, 'c': 3})
 		
-	# 	cs_a = Schema({'a': int, Dict.fixed: False})
-	# 	cs_b = Schema({'b': int, Dict.fixed: True})
-	# 	cs = cs_a + cs_b
-	# 	self.assertFails(cs, {'a':1, 'b': 2, 'c': 3})
-		
-	# 	cs_a = Schema({'a': int, Dict.fixed: False})
-	# 	cs_b = Schema({'b': int, Dict.fixed: False})
-	# 	cs = cs_a + cs_b
-	# 	self.assertValidates(cs, {'a':1, 'b': 2, 'c': 3})
+	 	cs_a = Schema({'a': int, Dict.skip_unknown_keys: True})
+	 	cs_b = Schema({'b': int, Dict.skip_unknown_keys: True})
+	 	cs = cs_a + cs_b
+	 	self.assertEquals(cs.compiled.skip_unknown_keys, True)
+	 	self.assertValidates(cs, {'a':1, 'b': 2, 'c': 3})
 		
 	
-	# def test_schema_addition_default(self):
-	# 	cs_a = Schema({'a': int, Dict.default: {'a': 1}})
-	# 	cs_b = Schema({'b': int, Dict.default: {'b': 2}})
-	# 	cs = cs_a + cs_b
-	# 	self.assertValidates(cs, None, {'a': 1, 'b': 2})
+	def test_schema_addition_default(self):
+	 	#cs_a = Schema({'a': int, Dict.default: {'a': 1}})
+	 	#cs_b = Schema({'b': int, Dict.default: {'b': 2}})
+	 	#cs = cs_a + cs_b
+	 	#self.assertValidates(cs, None, {'a': 1, 'b': 2})
+	 	pass # TODO
+
+	def test_schema_addition_typekeys(self):
+	 	cs_a = Schema({str: object})
+	 	cs_b = Schema({int: bool})
+	 	cs = cs_a + cs_b
+	 	self.assertFails(cs_a, {"string": True, 1: False})
+	 	self.assertFails(cs_b, {"string": True, 1: False})
+	 	self.assertValidates(cs, {"string": True, 1: False})
+
+
+	 	# Two of the same typekeys with conflicting infos will raise an schemaerror
+	 	with self.assertRaises(SchemaError):
+	 		cs_a = Schema({str: object})
+	 		cs_b = Schema({str: bool})
+	 		cs = cs_a + cs_b
+
+	 	# But two with the same will go through
+	 	cs_a = Schema({str: bool})
+	 	cs_b = Schema({str: bool})
+	 	cs = cs_a + cs_b
 		
 		
+	def test_schema_addition_on_and_tokens(self):
+		cs_a = Schema(And(int, Min(0)))
+		cs_b = Schema(And(int, Max(10)))
+		cs = cs_a + cs_b
+		self.assertValidates(cs_a, 20, 20)
+		self.assertValidates(cs_b, -20, -20)
+		self.assertFails(cs, 20)
+		self.assertFails(cs, -20)
 		
 		
 def run_tests():

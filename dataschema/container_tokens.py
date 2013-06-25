@@ -2,7 +2,7 @@
 
 from collections import OrderedDict
 
-from .core import ContainerToken
+from .core import ContainerToken, Token
 from .exceptions import SchemaError, ValidationError
 
 
@@ -18,18 +18,29 @@ class And(ContainerToken):
 
 	def __init__(self, *args):
 		super(And, self).__init__()
-		self.compiled = []
-		for arg in args:
-			token = self.get_token(arg)
-			token.name = "Child-token of And `{}`".format(self.name)
-			self.compiled.append(token)
+		self.compiled = [self.get_token(arg) for arg in args]
 
+	def set_path(self, path):
+		self.path = path + u"And->"
+		for token in self.compiled:
+			token.set_path(self.path)
 
 	def validate(self, values):
 		for token in self.compiled:
 			values = token.validate(values)
 		return values
 
+
+	def __add__(self, other):
+		""" Adding to and-tokens together. All entries of the first and are joined by the 
+		second and entries. """
+		if not isinstance(other, And):
+			raise SchemaError(u"Can't combine none-and-token `{}` and and-token `{}`!".format(other, self))
+		return And(*(self.compiled + other.compiled))
+
+	def as_json(self, **kwargs):
+		_tmp = {key: token.as_json() for key, token in self.compiled.items()}
+		return super(Dict, self).as_json(name="And", **_tmp)
 
 
 
@@ -39,13 +50,15 @@ class Or(ContainerToken):
 	If no token can validate the input, a schema-error is raised
 	"""
 
-	def __init__(self, *args):
+	def __init__(self, msg=None, *args):
 		super(Or, self).__init__()
-		self.compiled = []
-		for arg in args:
-			token = self.get_token(arg)
-			token.name = "Child-token of Or `{}`".format(self.name)
-			self.compiled.append(token)
+		self.msg = msg
+		self.compiled = [self.get_token(arg) for arg in args]
+
+	def set_path(self, path):
+		self.path = path + "Or->"
+		for token in self.compiled:
+			token.set_path(self.path)
 
 	def validate(self, values):
 		for token in self.compiled:
@@ -54,7 +67,21 @@ class Or(ContainerToken):
 			except SchemaError as e:
 				pass
 
-		return SchemaError(u"Or-Token {} found no child-token that validates the input `{}`".format(self.name, values))
+		return ValidationErrror(self.msg or u"Or-Token {} found no child-token that validates the input `{}`".format(self.path, values))
+
+	def as_json(self, **kwargs):
+		_tmp = {key: token.as_json() for key, token in self.compiled.items()}
+		return super(Dict, self).as_json(name="Or", **_tmp)
+
+
+	def __add__(self, other):
+		"""
+		Adding to or-tokens together. The resulting or will first check the values from the first and then from the second
+		"""
+		if not isinstance(other, Or):
+			raise SchemaError(u"Can't combine none-Or-token `{}` and Or-token `{}`!".format(other, self))
+		return Or(*(self.compiled + other.compiled))
+
 
 
 
@@ -72,7 +99,7 @@ class TypeKey(object):
 		return isinstance(value_key, self.key_type)
 
 	def __repr__(self):
-		return u"<Dict.TypeKey type={}>".format(self.key_type)
+		return u"<Dict.TypeKey {}>".format(self.key_type.__name__)
 
 	def __cmp__(self, other):
 		""" return -1 (smaller) if self is a child of other, else we dont care """
@@ -94,7 +121,7 @@ class Dict(ContainerToken):
 	"""
 	
 	# Static objects for storing infos on the dict. object is used, to get a unique object to store in the dict
-	default, fixed, desc, required = object(), object(), object(), object()
+	default, skip_unknown_keys, desc, required = object(), object(), object(), object()
 	
 	
 	def __init__(self, definition):
@@ -106,30 +133,38 @@ class Dict(ContainerToken):
 		super(Dict, self).__init__()
 
 		# First extract all settings for the dict
-		self.fixed = definition.pop(Dict.fixed, True)
+		self.skip_unknown_keys = definition.pop(Dict.skip_unknown_keys, False)
 		self.required = definition.pop(Dict.required, True)
 		self.default = definition.pop(Dict.default, None)
 		self.desc = definition.pop(Dict.desc, None)
-		
+
 		# As a first step get all keys, distinguish them and get the token
 		self.compiled_valuekeys = {}
 		self.compiled_typekeys = {}
-		try:
-			for key, value in definition.items():
-				token = self.get_token(value)
-				token.name = "name=" + repr(key)
+	
+		for key, value in definition.items():
+			token = self.get_token(value)
 
-				if not isinstance(key, type):
-					self.compiled_valuekeys[key] = token
-				else:
-					self.compiled_typekeys[TypeKey(key)] = token
-		except SchemaError as e:
-			raise SchemaError(u"Dict '{}': {}".format(self.name, e.message))
+			if isinstance(key, Token):
+				raise NotImplementedError(u"This is currently not supported! Use basic types!")
+			elif isinstance(key, type):
+				self.compiled_typekeys[TypeKey(key)] = token
+			else:
+				self.compiled_valuekeys[key] = token
+				
+		
 			
 
 		# Now order the Typekey-dict with respect to their priority
 		self.compiled_typekeys = OrderedDict(sorted(self.compiled_typekeys.items(), key=lambda t: t[0]))
 		
+
+	def set_path(self, path):
+		self.path = path + "Dict"
+		for key, token in self.compiled_valuekeys.items():
+			token.set_path(u"{}:{}->".format(self.path, key))
+		for key, token in self.compiled_typekeys.items():
+			token.set_path(u"{}:{}->".format(self.path, key))
 
 		
 	def validate(self, value):
@@ -144,12 +179,12 @@ class Dict(ContainerToken):
 		# we dont have data, so check if there is a default and if so, return that
 		if value == None:
 			if self.default == None and self.required:
-				raise ValidationError(u"Value passed to '{}'' should have values, but is None!".format(self.name))
+				raise ValidationError(u"Value passed to {} should have values, but is None!".format(self.path))
 			return self.default
 			
 		# check we have the right kind of data
 		elif not isinstance(value, dict):
-			raise ValidationError(u"Value passed to '{}'' is not a dict! (value: {})".format(self.name, type(value)))
+			raise ValidationError(u"Value passed to {} is not a dict! (value: {})".format(self.path, type(value)))
 
 		# we have both data and is the right type, so validate it
 		else:
@@ -157,26 +192,23 @@ class Dict(ContainerToken):
 			tmp = {k: v for k, v in value.items()} # Create a copy of the input, so the input is not changed
 
 			
-			try:
-				# First validate each token found in the value-dict
-				for key, token in self.compiled_valuekeys.items():
-					result[key] = token.validate(tmp.pop(key, None))
+			# First validate each token found in the value-dict
+			for key, token in self.compiled_valuekeys.items():
+				result[key] = token.validate(tmp.pop(key, None))
 			
-				# Now try to match the compiled_typekeys to the left-over values (If match, validate and remove value)
-				for key, value in tmp.items():
-					for dictkeytype, token in self.compiled_typekeys.items():
-						if dictkeytype.matches(key):
-							result[key] = token.validate(value)
-							del tmp[key]
-							break
+			# Now try to match the compiled_typekeys to the left-over values (If match, validate and remove value)
+			for key, value in tmp.items():
+				for dictkeytype, token in self.compiled_typekeys.items():
+					if dictkeytype.matches(key):
+						result[key] = token.validate(value)
+						del tmp[key]
+						break
 
-			except ValidationError as e:
-				raise ValidationError(u"Dict '{}': {}".format(self.name, e.message))
 	
 
 			# now just check if there are leftovers and if they are allowed. If so, add them 
-			if self.fixed and len(tmp) > 0:
-				raise ValidationError(u"Dict '{}'' is fixed but encountered additional values: {}".format(self.name, tmp))
+			if not self.skip_unknown_keys and len(tmp) > 0:
+				raise ValidationError(u"Dict '{}'' is fixed but encountered additional values: {}".format(self.path, tmp))
 
 			# return the final dict
 			return result
@@ -191,28 +223,43 @@ class Dict(ContainerToken):
 		"""
 		if not isinstance(other, Dict):
 			raise SchemaError(u"Tried to add non-dict ({}) to dict!".format(other))
+
+		definition = {}
+
 		
-		# Add Tokens
-		tokens = {key: token for key, token in self.compiled.items()}
-		for key, token in other.compiled.items():
-			if key in tokens:
+		# Adding tokes of self
+		for key, token in self.compiled_valuekeys.items():
+			definition[key] = token
+		for key, token in self.compiled_typekeys.items():
+			definition[key] = token
+
+		# Update from other
+		for key, token in other.compiled_valuekeys.items():
+			if key in definition:
 				raise SchemaError(u"Can't merge {} with {}, because of multiple key `{}`.".format(self, other, key))
-			tokens[key] = token
+			definition[key] = token
+		
+		for key, token in other.compiled_typekeys.items():
+			if key in definition:
+				raise SchemaError(u"Can't merge {} with {}, because of multiple key `{}`.".format(self, other, key))
+			definition[key] = token
 	
 		# Add Settings from self and other (the resulting dict will have the stricter of each rules)
-		tokens[Dict.fixed] = self.fixed or other.fixed
-		tokens[Dict.required] = self.required or other.required
-		tokens[Dict.desc] = self.desc
-		if self.default or other.default:
-			tokens[Dict.default] = {key: value for key, value in self.default.items()} if self.default else {}
-			tokens[Dict.default].update({key: value for key, value in other.default.items()} if other.default else {})
+		definition[Dict.required] = self.required or other.required
+		definition[Dict.skip_unknown_keys] = self.skip_unknown_keys and other.skip_unknown_keys
+		definition[Dict.desc] = self.desc
+		if self.default != None and other.default != None:
+			raise SchemaError(u"Both Dict-tokens have defaults. Cant merge!")
+		definition[Dict.default] = self.default or other.default
 		
-		return Dict(tokens)
+		return Dict(definition)
 		
 		
 		
 		
 		
 	def as_json(self, **kwargs):
-		_tmp = {key: token.as_json() for key, token in self.compiled.items()}
-		return super(Dict, self).as_json(name="dict", fixed=self.fixed, required=self.required, desc=self.desc, default=self.default, **_tmp)
+		_tmp = {key: token.as_json() for key, token in self.compiled_valuekeys.items()}
+		for key, token in self.compiled_typekeys.items():
+			_tmp[key] = token.as_json()
+		return super(Dict, self).as_json(name="dict", skip_unknown_keys=self.skip_unknown_keys, required=self.required, desc=self.desc, default=self.default, **_tmp)

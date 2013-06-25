@@ -9,6 +9,12 @@ class SchemaError(Exception):
         super(SchemaError, self).__init__()
         self.message = msg
 
+    def __str__(self):
+        return self.message
+
+    def __repr__(self):
+        return self.message
+
 
 class ValidationError(Exception):
     """ 
@@ -17,4 +23,12 @@ class ValidationError(Exception):
     def __init__(self, msg):
         super(ValidationError, self).__init__()
         self.message = msg
+
+    def __repr__(self):
+        return self.message
+
+    def __str__(self):
+        return self.message
     
+    def __unicode__(self):
+        return self.message
