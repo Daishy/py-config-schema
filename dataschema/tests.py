@@ -11,7 +11,7 @@ import sys
 
 from .exceptions import SchemaError, ValidationError
 from .core import Schema
-from .value_tokens import Int, String, Bytestring, Bool, Object, AnyString
+from .value_tokens import Int, String, Bytestring, Unicode, Bool, Object
 from .container_tokens import Dict, And, Or
 from .decorator_tokens import *
 
@@ -99,38 +99,39 @@ class DataSchemaTests(unittest.TestCase):
 		self.assertFails(int, "1")
 		
 		
-	def test_string(self):
-		string_type = unicode if self.is_python_2() else str
-		bytestring_type = str if self.is_python_2() else bytes
-	 
-		# Check Basic values
-		self.assertValidates(string_type, u"test", u"test")	 	
-		self.assertValidates(String(), u"test", u"test")
+	def test_unicode(self):
+		if self.is_python_2():
+			self.assertValidates(Unicode(), u"test", u"test")	 	
+			self.assertValidates(unicode, u"test", u"test")
 
-		self.assertFails(string_type, "nonunicode")
-		self.assertFails(String(), "nonunicode")
-		
-
-		# Empty values should validate
-		self.assertValidates(string_type, u"", u"")
-		self.assertValidates(String(required=False), None, u"")
-		
-		# default
-		self.assertValidates(String(default=u"test"), None, u"test")
-		self.assertValidates(String(required=False), None, None)
+			self.assertFails(Unicode(), "nonunicode")
+		else:
+			self.assertValidates(Unicode(), "test", "test")
+			self.assertValidates(unicode, u"test", u"test")
+			self.assertFails(Bytestring(), b"test")
 		
 		# type-check
-		self.assertFails(string_type, 1)
+		self.assertFails(Unicode(), 1)
 
 
 
 	def test_bytestring(self):
-		string_type = unicode if self.is_python_2() else str
-		bytestring_type = str if self.is_python_2() else bytes
+		if self.is_python_2():
+			self.assertValidates(Bytestring(), "test", "test")
+			self.assertFails(Bytestring(), u"test")
+		else:
+			self.assertValidates(Bytestring(), b"test", b"test")
+			self.assertFails(Bytestring(), "test")
 
-		self.assertValidates(bytestring_type, "test", "test")
-		self.assertValidates(Bytestring(), "test", "test")
-		self.assertFails(string_type, "test")
+
+	def test_string(self):
+		if self.is_python_2():
+			self.assertValidates(String(), "a", "a")
+			self.assertValidates(String(), u"a", u"a")
+		else:
+			self.assertValidates(String(), "a", "a")
+			self.assertValidates(String(), u"a", u"a")
+			self.assertFails(String(), b"a")
 		
 		
 	def test_bool(self):
@@ -153,14 +154,14 @@ class DataSchemaTests(unittest.TestCase):
 		self.assertFails(object, None)
 
 
-	def test_anystring(self):
-		if self.is_python_2():
-			self.assertValidates(AnyString(), "a", "a")
-			self.assertValidates(AnyString(), u"a", u"a")
-		else:
-			self.assertValidates(AnyString(), "a", "a")
-			self.assertValidates(AnyString(), u"a", u"a")
-			self.assertFails(AnyString(), b"a")
+	# --------------------------------------------------------------------------------
+	#   Test direct values
+	def test_direct_values(self):
+		self.assertValidates({'a': 1}, {'a': 1})
+
+		self.assertValidates({'a': "test"}, {"a": "test"})
+		self.assertValidates(True, True)
+	
 
 
 	# --------------------------------------------------------------------------------
@@ -513,7 +514,7 @@ class DataSchemaTests(unittest.TestCase):
 	 	cs = cs_a + cs_b
 		
 		
-	def test_schema_addition_on_and_tokens(self):
+	def test_schema_addition_with_and_tokens(self):
 		cs_a = Schema(And(int, Min(0)))
 		cs_b = Schema(And(int, Max(10)))
 		cs = cs_a + cs_b
@@ -521,6 +522,10 @@ class DataSchemaTests(unittest.TestCase):
 		self.assertValidates(cs_b, -20, -20)
 		self.assertFails(cs, 20)
 		self.assertFails(cs, -20)
+
+	def test_schema_addition_override_with_direct_values(self):
+		cs_a = Schema({'a': int})
+		cs_b = Schema({'a': 1})
 		
 		
 def run_tests():

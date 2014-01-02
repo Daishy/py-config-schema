@@ -76,18 +76,30 @@ class ContainerToken(Token):
 		:param definition: A python datastructure (int,str, bool, dict, list, ....)
 		:return: The appropriate token-instance for the definition
 		"""                
-		from .container_tokens import Dict
+		from .container_tokens import Dict, List
+		from .value_tokens import Value
 		
 		if isinstance(definition, Schema): # if definition is schema, just return the inner token
 			return definition.compiled
 		if isinstance(definition, Token): # If already a token, use that one
 			return definition;
 		elif isinstance(definition, dict): # If a dict, than use the dict-class
-			return Dict(definition)
-		elif definition in ContainerToken.tokens: # If type is one of the associations in tokens
-			return ContainerToken.tokens[definition]()
-		else: # The type is not known
-			raise SchemaError(u"Schema can't resolve basic type `{}` to a schema-type".format(definition))
+			return Dict(definition)	
+		elif isinstance(definition, list): # if a list, use the List-Class
+			return List(definition)	
+		elif isinstance(definition, type):
+			if definition in ContainerToken.tokens: # If type is one of the associations in tokens
+				return ContainerToken.tokens[definition]()
+			else: # The type is not known
+				raise SchemaError(u"Schema can't resolve basic type `{}` to a schema-type".format(definition))
+		else:
+			return Value(definition)
+		#elif definition in ContainerToken.tokens: # If type is one of the associations in tokens
+			#print definition
+			#return ContainerToken.tokens[definition]()
+		#else: # The type is not known
+			#raise SchemaError(u"Schema can't resolve basic type `{}` to a schema-type".format(definition))
+
 
 
 

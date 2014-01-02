@@ -121,7 +121,7 @@ class Dict(ContainerToken):
 	"""
 	
 	# Static objects for storing infos on the dict. object is used, to get a unique object to store in the dict
-	default, skip_unknown_keys, desc, required = object(), object(), object(), object()
+	default, skip_unknown_keys, desc, required, fixed = object(), object(), object(), object(), object()
 	
 	
 	def __init__(self, definition):
@@ -134,6 +134,8 @@ class Dict(ContainerToken):
 
 		# First extract all settings for the dict
 		self.skip_unknown_keys = definition.pop(Dict.skip_unknown_keys, False)
+		self.fixed = definition.pop(Dict.fixed, True)
+		self.skip_unknown_keys = self.skip_unknown_keys or (not self.fixed) # Take either fixed or skip_unknown_keys
 		self.required = definition.pop(Dict.required, True)
 		self.default = definition.pop(Dict.default, None)
 		self.desc = definition.pop(Dict.desc, None)
@@ -235,8 +237,9 @@ class Dict(ContainerToken):
 
 		# Update from other
 		for key, token in other.compiled_valuekeys.items():
-			if key in definition:
-				raise SchemaError(u"Can't merge {} with {}, because of multiple key `{}`.".format(self, other, key))
+			# CHanged: Override from other
+			#if key in definition:
+			#	raise SchemaError(u"Can't merge {} with {}, because of multiple key `{}`.".format(self, other, key))
 			definition[key] = token
 		
 		for key, token in other.compiled_typekeys.items():
@@ -263,3 +266,40 @@ class Dict(ContainerToken):
 		for key, token in self.compiled_typekeys.items():
 			_tmp[key] = token.as_json()
 		return super(Dict, self).as_json(name="dict", skip_unknown_keys=self.skip_unknown_keys, required=self.required, desc=self.desc, default=self.default, **_tmp)
+
+
+
+
+
+class List(ContainerToken):
+	"""
+	This validates a python list. The definition should contain of one element, each other element in the given
+	array will be matched against:
+
+	ds.Schema([int]) will match [1, 2, 3]
+	ds.Schema(ds.Or(int, bool)) -> [1, True, 2]
+	"""
+	def __init__(self, definition):
+		super(List, self).__init__()
+		if len(definition) != 1:
+			raise SchemaError(u"List must have exactly one definition-parameter! e.g. [int])")
+		self.definition = self.get_token(definition[0])
+
+	def validate(self, value):
+		"""	TODO """
+		# we dont have data, so check if there is a default and if so, return that
+		if value == None:
+			raise ValidationError(u"Value passed to {} should be a list, but is None!".format(self.path))
+			
+		# check we have the right kind of data
+		elif not isinstance(value, list):
+			raise ValidationError(u"Value passed to {} is not a list! (value: {})".format(self.path, type(value)))
+
+		# no validate each entry
+		for entry in value:
+			self.definition.validate(entry)
+
+
+	def set_path(self, path):
+		self.path = path + "List"
+		self.definition.set_path(u"List->")

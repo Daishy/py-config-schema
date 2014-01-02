@@ -38,7 +38,7 @@ class Check(Call):
 	def validate(self, values):
 		check = super(Check, self).validate(values)
 		if not check:
-			raise validationError(self.msg or u"Check {} returned False!".format(self.path))
+			raise ValidationError(self.msg or u"Check {} returned False!".format(self.path))
 		return values
 
 
@@ -47,6 +47,12 @@ class IsPath(Check):
 	def __init__(self, msg=None):
 		import os
 		super(IsPath, self).__init__(os.path.exists, msg)
+
+	def validate(self, values):
+		try:
+			return super(IsPath, self).validate(values)
+		except ValidationError:
+			raise ValidationError(self.msg or u"IsPath returned false for path `{}`".format(values))
 
 
 class Range(DecoratorToken):
