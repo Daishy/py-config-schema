@@ -2,12 +2,31 @@
 
 from collections import OrderedDict
 
-from .core import ContainerToken, Token
-from .exceptions import SchemaError, ValidationError
+from dataschema.base import Token
+from dataschema.exceptions import SchemaError, ValidationError
 
 
-__all__ = ['And', 'Or', 'Dict']
+__all__ = ['And', 'Or', 'Dict', 'List']
 
+
+
+class ContainerToken(Token):
+	"""
+	This class manages the conversion from a basic python type like
+	dict, int, str, bool, ... to the appropriate token (Int, Dict, ...)
+
+	Most of the methods, like __add__, validate, __repr__ must be implemented
+	by the actuall subclasses of ContainerToken, because they are unique to each
+	container
+	"""
+
+	def __init__(self, msg=None, desc=None):
+		super(ContainerToken, self).__init__(msg=msg, desc=desc)
+
+
+# ============================================================================================================
+# ============================================================================================================
+# == The actuall COntainers
 
 
 class And(ContainerToken):
@@ -16,58 +35,66 @@ class And(ContainerToken):
 	this container
 	"""
 
-	def __init__(self, *args):
-		super(And, self).__init__()
+	def __init__(self, *args, **kwargs):
+		super(And, self).__init__(desc=kwargs.pop('desc', None))
 		self.compiled = [self.get_token(arg) for arg in args]
+		self.set_path(None)
 
-	def set_path(self, path):
-		self.path = path + u"And->"
+
+	def set_path(self, parent_path):
+		super(And, self).set_path(parent_path)
 		for token in self.compiled:
 			token.set_path(self.path)
 
-	def validate(self, values):
+	def _validate(self, values, default=None, has_default=False):
 		for token in self.compiled:
-			values = token.validate(values)
+			values = token._validate(values)
 		return values
 
 
 	def __add__(self, other):
-		""" Adding to and-tokens together. All entries of the first and are joined by the 
+		""" Adding two and-tokens together. All entries of the first and are joined by the 
 		second and entries. """
 		if not isinstance(other, And):
 			raise SchemaError(u"Can't combine none-and-token `{}` and and-token `{}`!".format(other, self))
 		return And(*(self.compiled + other.compiled))
 
 	def as_json(self, **kwargs):
-		_tmp = {key: token.as_json() for key, token in self.compiled.items()}
-		return super(Dict, self).as_json(name="And", **_tmp)
+		return super(And, self).as_json(**kwargs)
+
+	def __repr__(self):
+		string = "<and path={path}>\n".format(self.path)
+		string += "\n".join(["\t{}".format(c) for c in self.compiled])
+		string += "</and>"
+		return string
+
 
 
 
 class Or(ContainerToken):
 	"""
 	This token holds a set of other tokens. If validate, the first token to successfully validate will be used.
-	If no token can validate the input, a schema-error is raised
+	If no token can validate the input, a ValidationError is raised
 	"""
 
-	def __init__(self, msg=None, *args):
-		super(Or, self).__init__()
-		self.msg = msg
+	def __init__(self, *args, **kwargs):
+		super(Or, self).__init__(msg=kwargs.pop('msg', None), desc=kwargs.pop('desc', None))
 		self.compiled = [self.get_token(arg) for arg in args]
+		self.set_path(None)
 
-	def set_path(self, path):
-		self.path = path + "Or->"
+	def set_path(self, parent_path):
+		super(Or, self).set_path(parent_path)
 		for token in self.compiled:
 			token.set_path(self.path)
 
-	def validate(self, values):
+	def _validate(self, values, default=None, has_default=False):
 		for token in self.compiled:
 			try:
-				return token.validate(values)
-			except SchemaError as e:
+				return token._validate(values)
+			except ValidationError as e:
 				pass
 
-		return ValidationErrror(self.msg or u"Or-Token {} found no child-token that validates the input `{}`".format(self.path, values))
+		raise ValidationError(self.msg or u"Or-Token {} found no child-token that validates the input `{}`".format(self.path, values))
 
 	def as_json(self, **kwargs):
 		_tmp = {key: token.as_json() for key, token in self.compiled.items()}
@@ -82,6 +109,12 @@ class Or(ContainerToken):
 			raise SchemaError(u"Can't combine none-Or-token `{}` and Or-token `{}`!".format(other, self))
 		return Or(*(self.compiled + other.compiled))
 
+
+	def __repr__(self):
+		string = "<or path={path}>\n".format(self.path)
+		string += "\n".join(["\t{}".format(c) for c in self.compiled])
+		string += "</or>"
+		return string
 
 
 
@@ -121,7 +154,7 @@ class Dict(ContainerToken):
 	"""
 	
 	# Static objects for storing infos on the dict. object is used, to get a unique object to store in the dict
-	default, skip_unknown_keys, desc, required, fixed = object(), object(), object(), object(), object()
+	default, skip_unknown_keys, desc, required, fixed, msg = object(), object(), object(), object(), object(), object()
 	
 	
 	def __init__(self, definition):
@@ -139,6 +172,7 @@ class Dict(ContainerToken):
 		self.required = definition.pop(Dict.required, True)
 		self.default = definition.pop(Dict.default, None)
 		self.desc = definition.pop(Dict.desc, None)
+		self.msg = definition.pop(Dict.msg, None)
 
 		# As a first step get all keys, distinguish them and get the token
 		self.compiled_valuekeys = {}
@@ -153,23 +187,21 @@ class Dict(ContainerToken):
 				self.compiled_typekeys[TypeKey(key)] = token
 			else:
 				self.compiled_valuekeys[key] = token
-				
 		
-			
-
 		# Now order the Typekey-dict with respect to their priority
 		self.compiled_typekeys = OrderedDict(sorted(self.compiled_typekeys.items(), key=lambda t: t[0]))
 		
+		self.set_path(None)
 
-	def set_path(self, path):
-		self.path = path + "Dict"
+	def set_path(self, parent_path):
+		super(Dict, self).set_path(parent_path)
 		for key, token in self.compiled_valuekeys.items():
-			token.set_path(u"{}:{}->".format(self.path, key))
+			token.set_path(u"{}:{}".format(self.path, key))
 		for key, token in self.compiled_typekeys.items():
-			token.set_path(u"{}:{}->".format(self.path, key))
+			token.set_path(u"{}:{}".format(self.path, key))
 
 		
-	def validate(self, value):
+	def _validate(self, value, default=None, has_default=False):
 		"""
 		Validate the dictionary. This will first iterate through the `compiled_valuekeys` and process each 
 		entry with the matching entry in `value` (Keys that are not found in value will be validate with None as value.
@@ -181,12 +213,12 @@ class Dict(ContainerToken):
 		# we dont have data, so check if there is a default and if so, return that
 		if value == None:
 			if self.default == None and self.required:
-				raise ValidationError(u"Value passed to {} should have values, but is None!".format(self.path))
+				raise ValidationError(self.msg or u"Value passed to {} should have values, but is None!".format(self.path))
 			return self.default
 			
 		# check we have the right kind of data
 		elif not isinstance(value, dict):
-			raise ValidationError(u"Value passed to {} is not a dict! (value: {})".format(self.path, type(value)))
+			raise ValidationError(self.msg or u"Value passed to {} is not a dict! (value: {})".format(self.path, type(value)))
 
 		# we have both data and is the right type, so validate it
 		else:
@@ -196,13 +228,13 @@ class Dict(ContainerToken):
 			
 			# First validate each token found in the value-dict
 			for key, token in self.compiled_valuekeys.items():
-				result[key] = token.validate(tmp.pop(key, None))
+				result[key] = token._validate(tmp.pop(key, None))
 			
 			# Now try to match the compiled_typekeys to the left-over values (If match, validate and remove value)
 			for key, value in tmp.items():
 				for dictkeytype, token in self.compiled_typekeys.items():
 					if dictkeytype.matches(key):
-						result[key] = token.validate(value)
+						result[key] = token._validate(value)
 						del tmp[key]
 						break
 
@@ -281,12 +313,22 @@ class List(ContainerToken):
 	"""
 	def __init__(self, definition):
 		super(List, self).__init__()
-		if len(definition) != 1:
-			raise SchemaError(u"List must have exactly one definition-parameter! e.g. [int])")
-		self.definition = self.get_token(definition[0])
 
-	def validate(self, value):
-		"""	TODO """
+		# If we get a list, the inplace-style was used (e.g. ds.Or([int], ...))
+		if isinstance(definition, list):
+			if len(definition) != 1:
+				raise SchemaError(u"List must have exactly one definition-parameter! e.g. [int])")
+			self.definition = self.get_token(definition[0])
+		
+		# Otherwise we should have explicit init (e.g. ds.Or(ds.List(int))))
+		else:
+			self.definition = self.get_token(definition)
+
+		self.set_path(None)
+
+	def _validate(self, value, default=None, has_default=False):
+		"""	This will validate the values. The given value must be a list and each entry 
+		in this list is passed to the token defined in self.definition. """
 		# we dont have data, so check if there is a default and if so, return that
 		if value == None:
 			raise ValidationError(u"Value passed to {} should be a list, but is None!".format(self.path))
@@ -295,11 +337,16 @@ class List(ContainerToken):
 		elif not isinstance(value, list):
 			raise ValidationError(u"Value passed to {} is not a list! (value: {})".format(self.path, type(value)))
 
-		# no validate each entry
-		for entry in value:
-			self.definition.validate(entry)
+		# now validate each entry
+		return [self.definition._validate(e) for e in value]
+
+	def set_path(self, parent_path):
+		super(List, self).set_path(parent_path)
+		self.definition.set_path(self.path)
 
 
-	def set_path(self, path):
-		self.path = path + "List"
-		self.definition.set_path(u"List->")
+	def __add__(self, other):
+		raise NotImplementedError(u"This is not yet implemented!")
+
+	def __repr__(self):
+		return "<list path={path}>\n".format(self.path) + repr(self.definition) + "\n</list>"

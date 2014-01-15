@@ -4,10 +4,9 @@ to another type. While converting, this will also check
 if the type is actually correct
 """
 
-from .core import DecoratorToken
-from .exceptions import ValidationError, SchemaError
-
-from .value_tokens import String
+from dataschema.base import Token
+from dataschema.tokens.values import String
+from dataschema.exceptions import ValidationError
 
 
 __all__ = ['asDecimal']
@@ -19,7 +18,7 @@ class asDecimal(String):
 	def __init__(self, *args, **kwargs):
 		super(asDecimal, self).__init__(*args, **kwargs)
 
-	def validate(self, value):
+	def _validate(self, value, default=None, has_default=False):
 		import decimal
 		value = super(asDecimal, self).validate(value)
 
